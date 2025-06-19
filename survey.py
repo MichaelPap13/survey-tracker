@@ -2,7 +2,6 @@ import os
 import requests
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
