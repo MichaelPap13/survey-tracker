@@ -14,6 +14,7 @@ AIRTABLE_TOKEN = st.secrets["AIRTABLE_TOKEN"]
 BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
 TABLE_NAME = st.secrets["AIRTABLE_TABLE_NAME"]
 
+
 HEADERS = {
     "Authorization": f"Bearer {AIRTABLE_TOKEN}"
 }
@@ -49,8 +50,7 @@ def fetch_airtable_data():
             break
     return records
 
-@st.cache_data(ttl=3600)
-def process_records(records):
+def parse_records(records):
     rows = []
     for r in records:
         fields = r.get("fields", {})
@@ -68,11 +68,17 @@ def process_records(records):
         first_names = fields.get("First Name [Extracted]", [])
         last_names = fields.get("Last Name [Extracted]", [])
 
-        if isinstance(expert_ids, str): expert_ids = [expert_ids]
-        if isinstance(first_names, str): first_names = [first_names]
-        if isinstance(last_names, str): last_names = [last_names]
+        if isinstance(expert_ids, str):
+            expert_ids = [expert_ids]
+        if isinstance(first_names, str):
+            first_names = [first_names]
+        if isinstance(last_names, str):
+            last_names = [last_names]
 
-        expert_info = [(f"{fn} {ln}".strip(), eid) for fn, ln, eid in zip(first_names, last_names, expert_ids)]
+        expert_info = [
+            (f"{fn} {ln}".strip(), eid)
+            for fn, ln, eid in zip(first_names, last_names, expert_ids)
+        ]
 
         rows.append({
             "company_id": company_id,
@@ -85,35 +91,47 @@ def process_records(records):
             "Ownership": fields.get("Ownership of Former Relevant Company", "Unknown"),
             "Expert Info": expert_info
         })
-    df = pd.DataFrame(rows)
-    df_completed = df[df["Survey Completed"] == "Yes"]
-    summary_df = df_completed.groupby(["company_name", "company_id"]).agg(
-        Completed_Count=("Survey Completed", "count"),
-        Expert_Info=("Expert Info", lambda x: sum(x, []))
-    ).reset_index()
-    return df, df_completed, summary_df
-
-def format_expert_links(expert_info):
-    return ", ".join([
-        f"<a href='https://maven2.dialecticanet.com/experts/view/{eid}' target='_blank'>{name}</a>"
-        for name, eid in expert_info if eid
-    ])
+    return pd.DataFrame(rows)
 
 # Streamlit App
 st.set_page_config(page_title="Survey Completion Dashboard", layout="wide")
 st.title("📈 Expert Survey Engagement Dashboard")
 
 with st.spinner("Fetching latest data from Airtable..."):
-    df, df_completed, summary_df = process_records(fetch_airtable_data())
+    records = fetch_airtable_data()
+    df = parse_records(records)
 
 if df.empty:
     st.warning("No valid records with required fields")
 else:
+    df_completed = df[df["Survey Completed"] == "Yes"]
+
+    unique_companies_sent = df["company_display"].nunique()
+    unique_companies_completed = df_completed["company_display"].nunique()
+
+    col1, col2 = st.columns(2)
+    col1.metric(label="📨 Unique Companies Sent Survey", value=unique_companies_sent)
+    col2.metric(label="✅ Unique Companies with Completed Survey", value=unique_companies_completed)
+
     show_ids = st.checkbox("Show Company IDs", value=False)
     search_query = st.text_input("🔍 Search Company or Expert Name")
 
+    st.subheader("📊 Completed Surveys by Company")
+
+    summary_df = df_completed.groupby(["company_name", "company_id"]).agg(
+        Completed_Count=("Survey Completed", "count"),
+        Expert_Info=("Expert Info", lambda x: sum(x, []))
+    ).reset_index()
+
     summary_df["Display"] = summary_df.apply(
         lambda x: f"{x['company_name']} ({x['company_id']})" if pd.notna(x["company_id"]) and show_ids else x["company_name"], axis=1)
+
+    def format_expert_links(expert_info):
+        return ", ".join([
+            f"<a href='https://maven2.dialecticanet.com/experts/view/{eid}' target='_blank'>{name}</a>"
+            for name, eid in expert_info if eid
+        ])
+
     summary_df["Expert_Links"] = summary_df["Expert_Info"].apply(format_expert_links)
 
     if search_query:
@@ -146,17 +164,16 @@ else:
 
     st.markdown("### 💼 Company Survey Summary")
     st.markdown(render_table(display_df), unsafe_allow_html=True)
+
     st.download_button("Download CSV", summary_df.to_csv(index=False), file_name="completed_surveys_by_company.csv")
 
-    col1, col2 = st.columns(2)
-    col1.metric(label="📨 Unique Companies Sent Survey", value=df["company_display"].nunique())
-    col2.metric(label="✅ Unique Companies with Completed Survey", value=df_completed["company_display"].nunique())
-
     st.subheader("📍 Completed Surveys by Region")
-    st.bar_chart(df_completed["Region"].value_counts())
+    region_counts = df_completed["Region"].value_counts()
+    st.bar_chart(region_counts)
 
     st.subheader("🏭 Completed Surveys by Industry")
-    st.bar_chart(df_completed["Industry"].value_counts())
+    industry_counts = df_completed["Industry"].value_counts()
+    st.bar_chart(industry_counts)
 
     st.subheader("🧩 Interactive Pie Chart: Distribution by Region")
     fig1 = px.pie(df_completed, names="Region", title="Survey Completion by Region", hole=0.4)
@@ -170,7 +187,8 @@ else:
     st.caption(f"ℹ️ Missing FTE values: {missing_fte}")
 
     st.subheader("📊 Bar Chart: Company Size (FTEs)")
-    df_fte_grouped = df_completed[df_completed["FTEs"] != "Unknown"].copy()
+    df_fte_grouped = df_completed.copy()
+    df_fte_grouped = df_fte_grouped[df_fte_grouped["FTEs"] != "Unknown"]
     df_fte_grouped["FTEs"] = pd.to_numeric(df_fte_grouped["FTEs"], errors="coerce")
     df_fte_grouped = df_fte_grouped.dropna(subset=["FTEs"])
     df_fte_grouped["FTE Bucket"] = pd.cut(df_fte_grouped["FTEs"], bins=[0, 10, 50, 100, 250, 1000, float("inf")], labels=["0-10", "11-50", "51-100", "101-250", "251-1000", "1000+"])
@@ -181,5 +199,8 @@ else:
     st.caption(f"ℹ️ Missing Ownership values: {missing_own}")
 
     st.subheader("🏢 Distribution by Company Ownership")
+    ownership_counts = df_completed["Ownership"].value_counts()
     fig4 = px.pie(df_completed, names="Ownership", title="Ownership of Former Relevant Company", hole=0.4)
     st.plotly_chart(fig4, use_container_width=True)
+
+#pretty alright
