@@ -182,4 +182,4 @@ else:
 
     st.subheader("🏢 Distribution by Company Ownership")
     fig4 = px.pie(df_completed, names="Ownership", title="Ownership of Former Relevant Company", hole=0.4)
-    st.plotly_chart(fig4, use_container_width=True)
+    st.plotly_chart(fig4, use_container_width=True)           
