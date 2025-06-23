@@ -4,14 +4,19 @@ import os
 import requests
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
 
-# Load secrets directly (Streamlit Cloud handles these securely)
+# Load secrets from .env
 AIRTABLE_TOKEN = st.secrets["AIRTABLE_TOKEN"]
 BASE_ID = st.secrets["AIRTABLE_BASE_ID"]
 TABLE_NAME = st.secrets["AIRTABLE_TABLE_NAME"]
+
+# Show token status for debug
+st.sidebar.code(f"TOKEN loaded? {'Yes' if AIRTABLE_TOKEN else 'No'}")
+st.sidebar.code(f"TOKEN starts with: {AIRTABLE_TOKEN[:5] if AIRTABLE_TOKEN else 'None'}")
 
 HEADERS = {
     "Authorization": f"Bearer {AIRTABLE_TOKEN}"
@@ -118,12 +123,11 @@ else:
     col1.metric(label="📨 Unique Companies Sent Survey", value=unique_companies_sent)
     col2.metric(label="✅ Unique Companies with Completed Survey", value=unique_companies_completed)
 
-    st.subheader("📊 Completed Surveys by Company")
-
-    search_query = st.text_input("🔍 Search Company or Expert Name")
-
     show_ids = st.checkbox("Show Company IDs", value=False)
     page_size = st.selectbox("Rows per page", options=[10, 20, 50], index=1)
+    search_query = st.text_input("🔍 Search Company or Expert Name")
+
+    st.subheader("📊 Completed Surveys by Company")
 
     summary_df = df_completed.groupby(["company_name", "company_id"]).agg(
         Completed_Count=("Survey Completed", "count"),
@@ -147,24 +151,24 @@ else:
         summary_df = summary_df[summary_df["Display"].str.contains(search_query, case=False) |
                                 summary_df["Expert_Links"].str.contains(search_query, case=False)]
 
-    total_pages = (len(summary_df) - 1) // page_size + 1
-    page_num = st.number_input("Page", min_value=1, max_value=total_pages, step=1)
-    start = (page_num - 1) * page_size
-    end = start + page_size
-    display_df = summary_df.iloc[start:end]
-    st.write(display_df[["Display", "Completed_Count", "Expert_Links"]].rename(columns={
-        "Display": "Company",
-        "Expert_Links": "Expert Profiles"
-    }).to_html(index=False, escape=False), unsafe_allow_html=True)
+    st.markdown("### 💼 Company Survey Summary")
+
+    with st.expander("Expand to view company survey table"):
+        total_pages = (len(summary_df) - 1) // page_size + 1
+        page_num = st.number_input("Page", min_value=1, max_value=total_pages, step=1)
+        start = (page_num - 1) * page_size
+        end = start + page_size
+        display_df = summary_df.iloc[start:end]
+        st.write(display_df[["Display", "Completed_Count", "Expert_Links"]].rename(columns={
+            "Display": "Company",
+            "Expert_Links": "Expert Profiles"
+        }).to_markdown(index=False), unsafe_allow_html=True)
 
     st.download_button("Download CSV", summary_df.to_csv(index=False), file_name="completed_surveys_by_company.csv")
 
     st.subheader("📍 Completed Surveys by Region")
     region_counts = df_completed["Region"].value_counts()
-    if region_counts.empty:
-        st.info("No region data available for completed surveys.")
-    else:
-        st.bar_chart(region_counts)
+    st.bar_chart(region_counts)
 
     st.subheader("🏭 Completed Surveys by Industry")
     industry_counts = df_completed["Industry"].value_counts()
