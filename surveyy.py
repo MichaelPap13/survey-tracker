@@ -26,6 +26,7 @@ def fetch_airtable_data():
         "mv_company_id",
         "Relevant Company",
         "Survey Completed",
+        "Survey Sent",
         "Region",
         "Industry of Relevant Company",
         "FTEs of Relevant Company",
@@ -50,7 +51,7 @@ def fetch_airtable_data():
     return records
 
 @st.cache_data(ttl=3600)
-def process_records(records):
+def process_records(records): 
     rows = []
     for r in records:
         fields = r.get("fields", {})
@@ -79,6 +80,7 @@ def process_records(records):
             "company_name": company_name,
             "company_display": company_display,
             "Survey Completed": fields.get("Survey Completed", "No"),
+            "Survey Sent": fields.get("Survey Sent", "No"),
             "Region": fields.get("Region", "Unknown"),
             "Industry": industry,
             "FTEs": fields.get("FTEs of Relevant Company", "Unknown"),
@@ -87,11 +89,12 @@ def process_records(records):
         })
     df = pd.DataFrame(rows)
     df_completed = df[df["Survey Completed"] == "Yes"]
+    df_sent = df[df["Survey Sent"] == "Yes"]
     summary_df = df_completed.groupby(["company_name", "company_id"]).agg(
         Completed_Count=("Survey Completed", "count"),
         Expert_Info=("Expert Info", lambda x: sum(x, []))
     ).reset_index()
-    return df, df_completed, summary_df
+    return df, df_completed, df_sent, summary_df
 
 def format_expert_links(expert_info):
     return ", ".join([
@@ -104,7 +107,7 @@ st.set_page_config(page_title="Survey Completion Dashboard", layout="wide")
 st.title("📈 Expert Survey Engagement Dashboard")
 
 with st.spinner("Fetching latest data from Airtable..."):
-    df, df_completed, summary_df = process_records(fetch_airtable_data())
+    df, df_completed, df_sent, summary_df = process_records(fetch_airtable_data())
 
 if df.empty:
     st.warning("No valid records with required fields")
@@ -149,7 +152,7 @@ else:
     st.download_button("Download CSV", summary_df.to_csv(index=False), file_name="completed_surveys_by_company.csv")
 
     col1, col2 = st.columns(2)
-    col1.metric(label="📨 Unique Companies Sent Survey", value=df["company_display"].nunique())
+    col1.metric(label="📨 Unique Companies Sent Survey", value=df_sent["company_display"].nunique())
     col2.metric(label="✅ Unique Companies with Completed Survey", value=df_completed["company_display"].nunique())
 
     st.subheader("📍 Completed Surveys by Region")
